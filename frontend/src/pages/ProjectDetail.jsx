@@ -1,109 +1,80 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { Layout } from '../components/layout/Layout';
 import { projectsApi, assetsApi } from '../lib/api';
-import { AssetCard } from '../components/assets/AssetCard';
-import { AssetViewer } from '../components/assets/AssetViewer';
-import { ArrowLeft, MapPin, Loader2, Folder, File, ChevronRight } from 'lucide-react';
+import { Folder, MapPin, Loader2, AlertTriangle } from 'lucide-react';
 
 export default function ProjectDetail() {
   const { id } = useParams();
   const [project, setProject] = useState(null);
-  const [allAssets, setAllAssets] = useState([]);
-  const [currentPath, setCurrentPath] = useState([]); // Tracks folder depth: ['Admin', 'Architecture Certificate']
-  const [selectedAsset, setSelectedAsset] = useState(null);
+  const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [p, a] = await Promise.all([projectsApi.getById(id), assetsApi.getByProject(id)]);
-        setProject(p.data);
-        setAllAssets(a.data);
-      } finally { setLoading(false); }
+        const pRes = await projectsApi.getById(id);
+        setProject(pRes.data);
+        
+        const aRes = await assetsApi.getByProject(id);
+        // CRITICAL FIX: Protects the page from crashing if the API fails
+        setAssets(Array.isArray(aRes.data) ? aRes.data : []);
+      } catch (error) {
+        console.error("Failed to load project data:", error);
+        setAssets([]); // Fallback to safe empty array
+      } finally {
+        setLoading(false);
+      }
     };
     load();
   }, [id]);
 
-  // Logic to filter assets based on the current folder path
-  const getVisibleItems = () => {
-    const folders = new Set();
-    const files = [];
-
-    allAssets.forEach(asset => {
-      const pathParts = asset.metadata?.path || []; // Assuming backend sends [Admin, Letters]
-      
-      // If we are at the root, look for top-level folders (Admin, Drawings...)
-      if (currentPath.length === 0) {
-        if (pathParts.length > 0) folders.add(pathParts[0]);
-        else files.push(asset);
-      } 
-      // If we are inside a folder, look for items inside that path
-      else {
-        const isInsideMatch = currentPath.every((part, i) => pathParts[i] === part);
-        if (isInsideMatch) {
-          if (pathParts.length > currentPath.length) {
-            folders.add(pathParts[currentPath.length]);
-          } else {
-            files.push(asset);
-          }
-        }
-      }
+  const getFolders = () => {
+    const folderSet = new Set();
+    assets.forEach(asset => {
+      const path = asset.metadata?.path || [];
+      if (path.length > 0) folderSet.add(path[0]);
     });
-
-    return { folders: Array.from(folders), files };
+    return Array.from(folderSet);
   };
 
-  if (loading) return <Layout><div className="p-20"><Loader2 className="animate-spin text-gold" /></div></Layout>;
+  if (loading) return <Layout><div className="p-20 flex justify-center"><Loader2 className="animate-spin text-[#D4AF37]" size={48} /></div></Layout>;
 
-  const { folders, files } = getVisibleItems();
+  const folders = getFolders();
 
   return (
     <Layout>
       <div className="p-8 md:p-12">
-        {/* Breadcrumbs Navigation */}
-        <div className="flex items-center gap-2 text-white/40 text-xs uppercase tracking-widest mb-8">
-          <Link to="/projects" className="hover:text-white transition-colors">Projects</Link>
-          <ChevronRight size={12} />
-          <button onClick={() => setCurrentPath([])} className="hover:text-white transition-colors">{project?.name}</button>
-          {currentPath.map((folder, i) => (
-            <React.Fragment key={i}>
-              <ChevronRight size={12} />
-              <button 
-                onClick={() => setCurrentPath(currentPath.slice(0, i + 1))}
-                className="hover:text-white transition-colors"
-              >
-                {folder}
-              </button>
-            </React.Fragment>
-          ))}
+        <h1 className="text-5xl text-white mb-4 uppercase tracking-tighter font-serif">
+          {project?.name || "Connecting..."}
+        </h1>
+        <div className="flex items-center gap-4 text-white/40 mb-12">
+            <MapPin size={16}/> {project?.location || "Lagos, Nigeria"}
+            <span className="border border-white/10 px-3 py-1 text-xs rounded-full">
+                {assets.length} Files Linked
+            </span>
         </div>
-
-        <h1 className="text-5xl text-white mb-4">{project?.name}</h1>
-        <div className="flex items-center gap-4 text-white/40 mb-12"><MapPin size={16}/> {project?.location}</div>
         
-        {/* Folders Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 mb-12">
-          {folders.map(folder => (
-            <button 
-              key={folder}
-              onClick={() => setCurrentPath([...currentPath, folder])}
-              className="folder-card p-6 flex flex-col items-center gap-4 text-white/60 hover:text-gold group"
-            >
-              <Folder size={40} strokeWidth={1.5} className="group-hover:scale-110 transition-transform" />
-              <span className="text-sm font-medium uppercase tracking-tight">{folder}</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Files Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          {files.map((asset, i) => (
-            <AssetCard key={asset.id} asset={asset} index={i} onClick={setSelectedAsset} />
-          ))}
-        </div>
-
-        <AssetViewer asset={selectedAsset} open={!!selectedAsset} onOpenChange={() => setSelectedAsset(null)} />
+        <h2 className="text-[#D4AF37] text-xs uppercase tracking-widest mb-6">Server Folders</h2>
+        
+        {folders.length === 0 ? (
+          <div className="p-10 border border-dashed border-red-500/30 bg-red-500/5 rounded-lg flex gap-4">
+              <AlertTriangle className="text-red-400" />
+              <div>
+                  <h3 className="font-bold text-red-300">Database Link Broken</h3>
+                  <p className="text-sm text-red-200/70 mt-1">The frontend is looking for files, but the backend returned 0. We need to fix the Python Scanner ID format.</p>
+              </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            {folders.map(folder => (
+              <div key={folder} className="bg-[#111] border border-white/5 hover:border-[#D4AF37]/50 p-8 flex flex-col items-center group cursor-pointer transition-all rounded-lg">
+                <Folder size={48} className="text-[#D4AF37]/40 group-hover:text-[#D4AF37] mb-4 transition-colors" />
+                <span className="text-sm font-medium uppercase tracking-widest text-white/80">{folder}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </Layout>
   );
