@@ -1,234 +1,157 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Dialog, DialogContent, DialogTitle, DialogDescription } from '../ui/dialog';
-import { Search, FolderOpen, Image, X, Loader2 } from 'lucide-react';
-import { searchApi } from '../../lib/api';
-import { getCategoryColor } from '../../lib/utils';
+import { Search, X, File as FileIcon, Image as ImageIcon, Folder, Loader2 } from 'lucide-react';
 
 export const GlobalSearch = ({ open, onOpenChange }) => {
-  const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState({ projects: [], assets: [] });
   const [loading, setLoading] = useState(false);
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const navigate = useNavigate();
 
-  // Keyboard shortcut (Cmd+K / Ctrl+K)
+  // The Live Search Engine
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        onOpenChange(true);
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onOpenChange]);
-
-  // Search handler connected to your Python backend
-  const handleSearch = useCallback(async (searchQuery) => {
-    if (!searchQuery.trim()) {
+    // If the modal is closed, wipe the old search clean
+    if (!open) {
+      setQuery('');
       setResults({ projects: [], assets: [] });
       return;
     }
 
-    setLoading(true);
-    try {
-      const response = await searchApi.search(searchQuery);
-      setResults(response.data);
-      setSelectedIndex(0);
-    } catch (error) {
-      console.error('Search error:', error);
-      setResults({ projects: [], assets: [] });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // Debounced search (waits for you to stop typing before searching)
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      handleSearch(query);
-    }, 200);
-
-    return () => clearTimeout(timer);
-  }, [query, handleSearch]);
-
-  // Reset when closed
-  useEffect(() => {
-    if (!open) {
-      setQuery('');
-      setResults({ projects: [], assets: [] });
-      setSelectedIndex(0);
-    }
-  }, [open]);
-
-  // Navigate to the selected result
-  const handleSelect = (type, id) => {
-    onOpenChange(false);
-    
-    // Slight delay allows the modal to remove its body-scroll-lock before the page transitions
-    setTimeout(() => {
-      if (type === 'project') {
-        navigate(`/projects/${id}`);
-      } else {
-        navigate(`/projects?asset=${id}`);
+    // A "Debounce" function: waits 300ms after you stop typing before hitting the Python server
+    const delayDebounceFn = setTimeout(async () => {
+      if (query.length < 2) {
+        setResults({ projects: [], assets: [] });
+        return;
       }
-    }, 150);
-  };
+      setLoading(true);
+      try {
+        const res = await fetch(`http://localhost:8000/api/search?q=${encodeURIComponent(query)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setResults(data);
+        }
+      } catch (error) {
+        console.error("Search failed", error);
+      } finally {
+        setLoading(false);
+      }
+    }, 300);
 
-  // Keyboard navigation logic
-  const allResults = [
-    ...results.projects.map(p => ({ type: 'project', ...p })),
-    ...results.assets.map(a => ({ type: 'asset', ...a }))
-  ];
+    return () => clearTimeout(delayDebounceFn);
+  }, [query, open]);
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setSelectedIndex(prev => Math.min(prev + 1, allResults.length - 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setSelectedIndex(prev => Math.max(prev - 1, 0));
-    } else if (e.key === 'Enter' && allResults[selectedIndex]) {
-      e.preventDefault();
-      const item = allResults[selectedIndex];
-      handleSelect(item.type, item.id);
+  // Uses our "Bridge" to open files natively from the search modal!
+  const handleOpenFile = async (fileUrl) => {
+    try {
+      await fetch('http://localhost:8000/api/open-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_url: fileUrl })
+      });
+      onOpenChange(false); // Auto-close the search modal when the file opens
+    } catch (err) {
+      console.error("Failed to open file:", err);
     }
   };
+
+  if (!open) return null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl p-0 bg-[#121212] border border-white/10 overflow-hidden">
-        {/* Screen Reader Accessibility */}
-        <DialogTitle className="sr-only">Global Search</DialogTitle>
-        <DialogDescription className="sr-only">Search for architectural projects and assets.</DialogDescription>
-
-        {/* Search Input Bar */}
-        <div className="flex items-center gap-3 px-4 py-4 border-b border-white/5">
-          {loading ? (
-            <Loader2 className="w-5 h-5 text-white/40 animate-spin" />
-          ) : (
-            <Search className="w-5 h-5 text-white/40" />
-          )}
-          <input
-            type="text"
-            placeholder="Search projects, assets, locations..."
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh] bg-black/60 backdrop-blur-sm" onClick={() => onOpenChange(false)}>
+      <div 
+        className="w-full max-w-2xl bg-[#111] border border-white/10 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Search Input Area */}
+        <div className="flex items-center px-4 py-4 border-b border-white/10 relative">
+          <Search className="w-5 h-5 text-[#D4AF37]" />
+          <input 
+            type="text" 
+            placeholder="Search projects, files, or categories (e.g., 'Elevation')..." 
+            className="w-full bg-transparent border-none text-white px-4 outline-none placeholder:text-white/30"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
-            className="flex-1 bg-transparent text-[#F5F5F0] placeholder:text-white/30 text-base outline-none"
+            onChange={e => setQuery(e.target.value)}
             autoFocus
           />
-          {query && (
-            <button 
-              onClick={() => setQuery('')}
-              className="p-1 hover:bg-white/5 text-white/40 hover:text-white/60 transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+          {loading && <Loader2 className="w-5 h-5 text-white/30 animate-spin absolute right-12" />}
+          <button onClick={() => onOpenChange(false)} className="p-1 hover:bg-white/10 rounded text-white/50 hover:text-white transition-colors">
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
-        {/* Search Results Display */}
-        <div className="max-h-[60vh] overflow-y-auto">
-          {!query && (
-            <div className="px-4 py-8 text-center text-white/30 text-sm">
-              Start typing to search across all projects and assets
+        {/* Results Area */}
+        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+          {query.length < 2 ? (
+            <div className="text-center text-white/30 py-8 text-xs uppercase tracking-widest">
+              Type at least 2 characters to search
             </div>
-          )}
-
-          {query && allResults.length === 0 && !loading && (
-            <div className="px-4 py-8 text-center text-white/30 text-sm">
-              No results found for "{query}"
+          ) : results.projects.length === 0 && results.assets.length === 0 && !loading ? (
+            <div className="text-center text-white/30 py-8 text-xs uppercase tracking-widest">
+              No results found
             </div>
-          )}
-
-          {/* Projects List */}
-          {results.projects.length > 0 && (
-            <div className="py-2">
-              <div className="px-4 py-2 text-[10px] font-mono uppercase tracking-widest text-white/30">
-                Projects
-              </div>
-              {results.projects.map((project, index) => (
-                <button
-                  key={project.id}
-                  onClick={() => handleSelect('project', project.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
-                    selectedIndex === index ? 'bg-white/5' : 'hover:bg-white/[0.02]'
-                  }`}
-                >
-                  <div className="w-10 h-10 bg-white/5 flex items-center justify-center shrink-0">
-                    <FolderOpen className="w-5 h-5 text-[#D4AF37]" strokeWidth={1.5} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[#F5F5F0] text-sm font-medium truncate">
-                      {project.name}
-                    </div>
-                    <div className="text-white/40 text-xs truncate mt-0.5">
-                      {project.location} · {project.typology}
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Assets List */}
-          {results.assets.length > 0 && (
-            <div className="py-2 border-t border-white/5">
-              <div className="px-4 py-2 text-[10px] font-mono uppercase tracking-widest text-white/30">
-                Assets
-              </div>
-              {results.assets.map((asset, index) => {
-                const adjustedIndex = results.projects.length + index;
-                return (
-                  <button
-                    key={asset.id}
-                    onClick={() => handleSelect('asset', asset.id)}
-                    className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
-                      selectedIndex === adjustedIndex ? 'bg-white/5' : 'hover:bg-white/[0.02]'
-                    }`}
-                  >
-                    <div className="w-10 h-10 bg-black/50 border border-white/5 overflow-hidden shrink-0">
-                      {asset.file_type === 'image' ? (
-                        <img 
-                          src={asset.file_url} 
-                          alt={asset.name}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <Image className="w-5 h-5 text-white/40" strokeWidth={1.5} />
+          ) : (
+            <div className="space-y-6">
+              
+              {/* Project Results */}
+              {results.projects.length > 0 && (
+                <div>
+                  <h3 className="text-[#D4AF37] text-[10px] uppercase tracking-widest mb-3 px-2">Projects</h3>
+                  <div className="space-y-1">
+                    {results.projects.map(p => (
+                      <div 
+                        key={p.id} 
+                        onClick={() => { navigate(`/projects/${p.id}`); onOpenChange(false); }}
+                        className="flex items-center gap-4 p-2 rounded hover:bg-white/5 cursor-pointer group transition-colors"
+                      >
+                        <div className="w-10 h-10 rounded bg-black/50 border border-white/5 flex items-center justify-center group-hover:border-[#D4AF37]/50 transition-colors">
+                          <Folder className="w-5 h-5 text-white/40 group-hover:text-[#D4AF37] transition-colors" />
                         </div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[#F5F5F0] text-sm font-medium truncate">
-                        {asset.name}
+                        <div>
+                          <div className="text-sm text-white group-hover:text-[#D4AF37] transition-colors">{p.name}</div>
+                          <div className="text-[10px] text-white/40 uppercase tracking-wider mt-0.5">{p.typology} • {p.location}</div>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className={`tag-pill ${getCategoryColor(asset.ai_category)}`}>
-                          {asset.ai_category}
-                        </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Asset Results */}
+              {results.assets.length > 0 && (
+                <div>
+                  <h3 className="text-[#D4AF37] text-[10px] uppercase tracking-widest mb-3 px-2">Files & Assets</h3>
+                  <div className="space-y-1">
+                    {results.assets.map(a => (
+                      <div 
+                        key={a.id} 
+                        onClick={() => handleOpenFile(a.file_url)}
+                        className="flex items-center gap-4 p-2 rounded hover:bg-white/5 cursor-pointer group transition-colors"
+                      >
+                        <div className="w-10 h-10 rounded bg-black/50 border border-white/5 flex items-center justify-center group-hover:border-[#D4AF37]/50 overflow-hidden transition-colors">
+                          {/* Search uses the exact same Live Thumbnails we just built! */}
+                          {a.file_type === 'image' ? (
+                            <img src={`http://localhost:8000/api/serve-image?file_url=${encodeURIComponent(a.file_url)}`} alt={a.name} className="w-full h-full object-cover opacity-70 group-hover:opacity-100 transition-opacity" />
+                          ) : (
+                            <FileIcon className="w-5 h-5 text-white/40 group-hover:text-[#D4AF37] transition-colors" />
+                          )}
+                        </div>
+                        <div className="flex-1 truncate border-r border-white/5 pr-4">
+                          <div className="text-sm text-white truncate group-hover:text-[#D4AF37] transition-colors">{a.name}</div>
+                          <div className="text-[10px] text-white/40 uppercase tracking-wider mt-0.5">{a.ai_category}</div>
+                        </div>
+                        <div className="text-[10px] font-mono text-white/30 pl-4 pr-2">
+                            {(a.size_bytes / 1024 / 1024).toFixed(1)} MB
+                        </div>
                       </div>
-                    </div>
-                  </button>
-                );
-              })}
+                    ))}
+                  </div>
+                </div>
+              )}
+
             </div>
           )}
         </div>
-
-        {/* Keyboard Navigation Footer */}
-        <div className="px-4 py-3 border-t border-white/5 flex items-center justify-between text-[10px] font-mono text-white/30">
-          <div className="flex items-center gap-4">
-            <span><kbd className="px-1.5 py-0.5 bg-white/5 rounded border border-white/10">↑↓</kbd> Navigate</span>
-            <span><kbd className="px-1.5 py-0.5 bg-white/5 rounded border border-white/10">↵</kbd> Select</span>
-          </div>
-          <span><kbd className="px-1.5 py-0.5 bg-white/5 rounded border border-white/10">ESC</kbd> Close</span>
-        </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
-};
+}

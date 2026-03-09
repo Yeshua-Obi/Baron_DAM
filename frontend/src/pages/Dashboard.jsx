@@ -1,120 +1,107 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
 import { Layout } from '../components/layout/Layout';
-import { ProjectCard } from '../components/projects/ProjectCard';
-import { FolderOpen, Image as ImageIcon, TrendingUp, ArrowRight, Database, Loader2 } from 'lucide-react';
-import { projectsApi, statsApi, seedDemoData } from '../lib/api';
-import { toast } from 'sonner';
+import { Folder, Image as ImageIcon, TrendingUp, Loader2, AlertTriangle } from 'lucide-react';
 
 export default function Dashboard() {
-  const [stats, setStats] = useState(null);
-  const [recentProjects, setRecentProjects] = useState([]);
+  const [stats, setStats] = useState({
+    total_projects: 0,
+    total_assets: 0,
+    assets_by_category: {},
+  });
   const [loading, setLoading] = useState(true);
-  const [seeding, setSeeding] = useState(false);
+  const [fetchError, setFetchError] = useState(null); // NEW: Error tracker
 
   useEffect(() => {
-    loadData();
+    const fetchStats = async () => {
+      try {
+        // Switched from 'localhost' to '127.0.0.1' to bypass Windows network quirks
+        const res = await fetch('http://127.0.0.1:8000/api/stats');
+        
+        if (!res.ok) {
+          throw new Error(`Server rejected connection with status: ${res.status}`);
+        }
+        
+        const data = await res.json();
+        setStats(data);
+      } catch (error) {
+        console.error("Failed to load dashboard stats:", error);
+        setFetchError(error.message); // Save the error to show on screen
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchStats();
   }, []);
 
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      const [statsRes, projectsRes] = await Promise.all([
-        statsApi.getStats(),
-        projectsApi.getAll({ limit: 4 })
-      ]);
-      setStats(statsRes.data);
-      setRecentProjects(projectsRes.data);
-    } catch (error) {
-      console.error('Error loading dashboard data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  if (loading) {
+    return (
+      <Layout>
+        <div className="p-20 flex justify-center">
+          <Loader2 className="animate-spin text-[#D4AF37]" size={48} />
+        </div>
+      </Layout>
+    );
+  }
 
-  const handleSeedDemo = async () => {
-    setSeeding(true);
-    try {
-      await seedDemoData();
-      toast.success('Demo data loaded successfully!');
-      loadData();
-    } catch (error) {
-      console.error('Error seeding demo data:', error);
-      toast.error('Failed to load demo data.');
-    } finally {
-      setSeeding(false);
-    }
-  };
-
-  const statCards = [
-    { label: 'Total Projects', value: stats?.total_projects || 0, icon: FolderOpen, color: 'text-[#D4AF37]' },
-    { label: 'Total Assets', value: stats?.total_assets || 0, icon: ImageIcon, color: 'text-cyan-400' },
-    { label: 'Categories', value: Object.keys(stats?.assets_by_category || {}).length, icon: TrendingUp, color: 'text-emerald-400' }
-  ];
+  const totalCategories = Object.keys(stats.assets_by_category || {}).length;
 
   return (
     <Layout>
-      <div className="p-8 md:p-12 lg:p-16">
-        <header className="mb-16">
-          <p className="text-[10px] font-mono uppercase tracking-[0.3em] text-[#D4AF37] mb-4">
+      <div className="p-8 md:p-12">
+        <div className="mb-16">
+          <h2 className="text-[#D4AF37] text-[10px] uppercase tracking-[0.2em] mb-4">
             Digital Asset Management
-          </p>
-          <h1 className="font-serif text-4xl md:text-5xl lg:text-6xl text-[#F5F5F0] tracking-tight leading-tight">
+          </h2>
+          <h1 className="text-5xl md:text-6xl text-[#D4AF37] uppercase tracking-widest font-serif mb-6">
             Baron Architecture
           </h1>
-          <p className="text-white/40 text-base font-light mt-4 max-w-xl leading-relaxed">
+          <p className="text-white/40 font-light tracking-wide text-sm max-w-2xl">
             Manage, organize, and search your architectural assets with intelligent categorization.
           </p>
-        </header>
+        </div>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-8 h-8 text-[#D4AF37] animate-spin" />
+        {/* NEW: If the connection fails, it will show this red box instead of hiding the error */}
+        {fetchError && (
+          <div className="mb-8 p-4 border border-red-500/30 bg-red-500/10 rounded flex items-center gap-4 text-red-400">
+            <AlertTriangle />
+            <div>
+              <p className="font-bold text-sm">Connection Blocked</p>
+              <p className="text-xs text-red-400/70">{fetchError}. Please right-click the page, select 'Inspect', and check the 'Console' tab for red text.</p>
+            </div>
           </div>
-        ) : (
-          <>
-            <section className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-16">
-              {statCards.map((stat, index) => (
-                <div key={stat.label} className={`card-hover bg-[#121212] border border-white/5 p-6 animate-fade-in stagger-${index + 1}`}>
-                  <div className="flex items-start justify-between mb-4">
-                    <stat.icon className={`w-5 h-5 ${stat.color}`} strokeWidth={1.5} />
-                    <span className="text-[10px] font-mono uppercase tracking-widest text-white/30">{stat.label}</span>
-                  </div>
-                  <div className="font-serif text-4xl text-[#F5F5F0]">{stat.value}</div>
-                </div>
-              ))}
-            </section>
-
-            {stats?.total_projects === 0 && (
-              <section className="mb-16">
-                <div className="bg-[#121212] border border-white/5 p-8 text-center">
-                  <Database className="w-12 h-12 text-white/20 mx-auto mb-4" strokeWidth={1} />
-                  <h3 className="font-serif text-xl text-[#F5F5F0] mb-2">No Projects Yet</h3>
-                  <p className="text-white/40 text-sm mb-6">Seed demo data to explore the DAM system with sample architectural assets.</p>
-                  <button onClick={handleSeedDemo} disabled={seeding} className="bg-[#D4AF37] text-black px-8 py-3 text-sm font-medium uppercase tracking-wider hover:bg-[#C5A059] disabled:opacity-50 flex items-center gap-2 mx-auto">
-                    {seeding ? <><Loader2 className="w-4 h-4 animate-spin" /> Seeding...</> : <><Database className="w-4 h-4" /> Seed Demo Data</>}
-                  </button>
-                </div>
-              </section>
-            )}
-
-            {recentProjects.length > 0 && (
-              <section>
-                <div className="flex items-center justify-between mb-8">
-                  <h2 className="font-serif text-2xl text-[#F5F5F0]">Recent Projects</h2>
-                  <Link to="/projects" className="flex items-center gap-2 text-sm text-white/40 hover:text-[#D4AF37] uppercase tracking-wider">
-                    View All <ArrowRight className="w-4 h-4" strokeWidth={1.5} />
-                  </Link>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  {recentProjects.map((project, index) => (
-                    <ProjectCard key={project.id} project={project} index={index} />
-                  ))}
-                </div>
-              </section>
-            )}
-          </>
         )}
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-[#111] border border-white/5 p-8 rounded flex flex-col justify-between min-h-[160px]">
+            <div className="flex justify-between items-start w-full">
+              <Folder className="text-[#D4AF37] w-5 h-5" />
+              <span className="text-white/30 text-[10px] uppercase tracking-widest">Total Projects</span>
+            </div>
+            <div className="text-5xl font-light text-[#D4AF37] font-serif mt-4">
+              {stats.total_projects}
+            </div>
+          </div>
+
+          <div className="bg-[#111] border border-white/5 p-8 rounded flex flex-col justify-between min-h-[160px]">
+            <div className="flex justify-between items-start w-full">
+              <ImageIcon className="text-cyan-500 w-5 h-5" />
+              <span className="text-white/30 text-[10px] uppercase tracking-widest">Total Assets</span>
+            </div>
+            <div className="text-5xl font-light text-[#D4AF37] font-serif mt-4">
+              {stats.total_assets}
+            </div>
+          </div>
+
+          <div className="bg-[#111] border border-white/5 p-8 rounded flex flex-col justify-between min-h-[160px]">
+            <div className="flex justify-between items-start w-full">
+              <TrendingUp className="text-emerald-500 w-5 h-5" />
+              <span className="text-white/30 text-[10px] uppercase tracking-widest">Categories</span>
+            </div>
+            <div className="text-5xl font-light text-[#D4AF37] font-serif mt-4">
+              {totalCategories}
+            </div>
+          </div>
+        </div>
       </div>
     </Layout>
   );
